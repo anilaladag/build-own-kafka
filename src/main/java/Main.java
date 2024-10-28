@@ -5,93 +5,104 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
+import java.util.Collections;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class Main {
-  public static void main(String[] args) {
 
-    ServerSocket serverSocket = null;
-    Socket clientSocket = null;
+  public static final Set<Short> SUPPORTED_API_VERSIONS = Set.of(0, 1, 2, 3, 4)
+      .stream()
+      .map(Integer::shortValue)
+      .collect(Collectors.toUnmodifiableSet());
+
+  public static class ApiKeys {
+    public static final short API_VERSION = 18;
+  }
+
+  public static class ErrorCodes {
+    public static final short NONE = 0;
+    public static final short UNSUPPORTED_VERSION = 35;
+  }
+
+  public static void main(String[] args) {
     int port = 9092;
-    try {
-      serverSocket = new ServerSocket(port);
+    try (ServerSocket serverSocket = new ServerSocket(port)) {
       serverSocket.setReuseAddress(true);
-      clientSocket = serverSocket.accept();
-      handleRequest(clientSocket);
-    } catch (IOException e) {
-      System.out.println("IOException: " + e.getMessage());
-    } finally {
-      try {
-        if (clientSocket != null) {
-          clientSocket.close();
-        }
-      } catch (IOException e) {
-        System.out.println("IOException: " + e.getMessage());
+      System.out.println("Server started on port " + port);
+
+      while (true) {
+        Socket clientSocket = serverSocket.accept();
+        // Create a new thread for each client connection
+        new Thread(() -> {
+          try {
+            handleRequest(clientSocket);
+          } catch (IOException e) {
+            System.err.println("Error handling client request: " + e.getMessage());
+          }
+        }).start();
       }
+    } catch (IOException e) {
+      System.err.println("Server error: " + e.getMessage());
     }
   }
-  
-  private static void handleRequest(final Socket clientSocket)
-      throws IOException {
 
-    InputStream in = clientSocket.getInputStream();
-      OutputStream out = clientSocket.getOutputStream();
-      
-      in.readNBytes(4);
-      var apiKey = in.readNBytes(2);
-      var apiVersionBytes = in.readNBytes(2);
-      var apiVersion = ByteBuffer.wrap(apiVersionBytes).getShort();
-      byte[] cId = in.readNBytes(4);
-      var bos = new ByteArrayOutputStream();
-      // size 32bit
-      bos.write(cId);
-      if (apiVersion < 0 || apiVersion > 4) {
-        bos.write(new byte[] {0, 35});
-      } else {
-        bos.write(new byte[] {0, 0});       // error code
-        bos.write(2);                       // array size + 1
-        bos.write(new byte[] {0, 18});      // api_key
-        bos.write(new byte[] {0, 3});       // min version
-        bos.write(new byte[] {0, 4});       // max version
-        bos.write(0);                       // tagged fields
-        bos.write(new byte[] {0, 0, 0, 0}); // throttle time
-        
-        bos.write(0); 
+  private static void handleRequest(Socket clientSocket) throws IOException {
+    try (InputStream in = clientSocket.getInputStream(); OutputStream out = clientSocket.getOutputStream()) {
+      while (true) {
+        int requestLength = byteArrayToInt(in.readNBytes(4));
+        short apiKey = byteArrayToShort(in.readNBytes(2));
+        short apiVersion = byteArrayToShort(in.readNBytes(2));
+        byte[] correlationId = in.readNBytes(4);
+        in.skipNBytes(requestLength - 8);
+
+        System.err.println("Request received - length: " + requestLength);
+        System.err.println("apiKey: " + apiKey);
+        System.err.println("apiVersion: " + apiVersion);
+        System.err.println("correlation id: " + byteArrayToInt(correlationId));
+
+        ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
+        responseBody.write(correlationId);
+
+        if (apiKey == ApiKeys.API_VERSION) {
+          if (SUPPORTED_API_VERSIONS.contains(apiVersion)) {
+            responseBody.write(shortToByteArray(ErrorCodes.NONE));
+            responseBody.write(2); // Number of API keys + 1
+            responseBody.write(shortToByteArray(apiKey));
+            responseBody.write(shortToByteArray(Collections.min(SUPPORTED_API_VERSIONS)));
+            responseBody.write(shortToByteArray(Collections.max(SUPPORTED_API_VERSIONS)));
+            responseBody.write(0); // tag buffer
+            responseBody.write(intToByteArray(0)); // throttle_time
+            responseBody.write(0); // tag buffer
+          } else {
+            responseBody.write(shortToByteArray(ErrorCodes.UNSUPPORTED_VERSION));
+            responseBody.write(intToByteArray(0)); // throttle_time
+            responseBody.write(0); // tag buffer
+          }
+        }
+
+        out.write(intToByteArray(responseBody.size()));
+        out.write(responseBody.toByteArray());
+        out.flush();
       }
-     
-      int size = bos.size();
-      byte[] sizeBytes = ByteBuffer.allocate(4).putInt(size).array();
-      var response = bos.toByteArray();
-      System.out.println(Arrays.toString(sizeBytes));
-      System.out.println(Arrays.toString(response));
-      out.write(sizeBytes);
-      out.write(response);
-      out.flush();
-
-  }
-
-  private static boolean isValidApiVersion(short apiVersion) {
-    return apiVersion >= 0 && apiVersion <= 4;
+    } finally {
+      clientSocket.close();
+    }
   }
 
   private static byte[] intToByteArray(int value) {
-    return new byte[] { (byte) (value >>> 24), (byte) (value >>> 16),
-        (byte) (value >>> 8), (byte) value };
+    return ByteBuffer.allocate(4).putInt(value).array();
   }
-  
+
   private static byte[] shortToByteArray(short value) {
-    return new byte[] {
-        (byte) (value >>> 8), (byte) value };
+    return ByteBuffer.allocate(2).putShort(value).array();
   }
-  
+
   private static int byteArrayToInt(byte[] bytes) {
     return ByteBuffer.wrap(bytes).getInt();
-
   }
-  
+
   private static short byteArrayToShort(byte[] bytes) {
     return ByteBuffer.wrap(bytes).getShort();
-
   }
 }
-
