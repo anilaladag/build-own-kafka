@@ -39,9 +39,18 @@ public class Main {
     byte[] apiVersion = in.readNBytes(2);
     byte[] correlationIdBytes = in.readNBytes(4);
 
+
     out.write(messageSizeBytes);
     out.write(correlationIdBytes);
 
+    if (!isValidApiVersion(byteArrayToShort(apiVersion))) {
+      out.write(shortToByteArray((short)35));
+    }
+
+  }
+
+  private static boolean isValidApiVersion(short apiVersion) {
+    return apiVersion >= 0 && apiVersion <= 4;
   }
 
   private static byte[] intToByteArray(int value) {
@@ -49,8 +58,18 @@ public class Main {
         (byte) (value >>> 8), (byte) value };
   }
   
+  private static byte[] shortToByteArray(short value) {
+    return new byte[] {
+        (byte) (value >>> 8), (byte) value };
+  }
+  
   private static int byteArrayToInt(byte[] bytes) {
-        return ByteBuffer.wrap(bytes).getInt();
+    return ByteBuffer.wrap(bytes).getInt();
+
+  }
+  
+  private static short byteArrayToShort(byte[] bytes) {
+    return ByteBuffer.wrap(bytes).getShort();
 
   }
 }
