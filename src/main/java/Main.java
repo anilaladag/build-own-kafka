@@ -1,6 +1,8 @@
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 
 public class Main {
   public static void main(String[] args) {
@@ -28,16 +30,28 @@ public class Main {
   
   private static void handleRequest(final Socket clientSocket)
       throws IOException {
-    byte[] messageSize = intToByteArray(1);
-    byte[] headerCorrelationId = intToByteArray(7);
+
+    InputStream in = clientSocket.getInputStream();
     var out = clientSocket.getOutputStream();
-    out.write(messageSize);
-    out.write(headerCorrelationId);
+
+    byte[] messageSizeBytes = in.readNBytes(4);
+    byte[] apiKey = in.readNBytes(2);
+    byte[] apiVersion = in.readNBytes(2);
+    byte[] correlationIdBytes = in.readNBytes(4);
+
+    out.write(messageSizeBytes);
+    out.write(correlationIdBytes);
+
   }
 
   private static byte[] intToByteArray(int value) {
     return new byte[] { (byte) (value >>> 24), (byte) (value >>> 16),
         (byte) (value >>> 8), (byte) value };
+  }
+  
+  private static int byteArrayToInt(byte[] bytes) {
+        return ByteBuffer.wrap(bytes).getInt();
+
   }
 }
 
