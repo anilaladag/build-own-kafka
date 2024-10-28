@@ -56,6 +56,7 @@ public class Main {
         bos.write(0);                       // tagged fields
         bos.write(new byte[] {0, 0, 0, 0}); // throttle time
         
+        bos.write(0); 
       }
      
       int size = bos.size();
