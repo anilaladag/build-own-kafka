@@ -1,8 +1,11 @@
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 public class Main {
   public static void main(String[] args) {
@@ -32,20 +35,37 @@ public class Main {
       throws IOException {
 
     InputStream in = clientSocket.getInputStream();
-    var out = clientSocket.getOutputStream();
-
-    byte[] messageSizeBytes = in.readNBytes(4);
-    byte[] apiKey = in.readNBytes(2);
-    byte[] apiVersion = in.readNBytes(2);
-    byte[] correlationIdBytes = in.readNBytes(4);
-
-
-    out.write(messageSizeBytes);
-    out.write(correlationIdBytes);
-
-    if (!isValidApiVersion(byteArrayToShort(apiVersion))) {
-      out.write(shortToByteArray((short)35));
-    }
+      OutputStream out = clientSocket.getOutputStream();
+      
+      in.readNBytes(4);
+      var apiKey = in.readNBytes(2);
+      var apiVersionBytes = in.readNBytes(2);
+      var apiVersion = ByteBuffer.wrap(apiVersionBytes).getShort();
+      byte[] cId = in.readNBytes(4);
+      var bos = new ByteArrayOutputStream();
+      // size 32bit
+      bos.write(cId);
+      if (apiVersion < 0 || apiVersion > 4) {
+        bos.write(new byte[] {0, 35});
+      } else {
+        bos.write(new byte[] {0, 0});       // error code
+        bos.write(2);                       // array size + 1
+        bos.write(new byte[] {0, 18});      // api_key
+        bos.write(new byte[] {0, 0});       // min version
+        bos.write(new byte[] {0, 4});       // max version
+        bos.write(0);                       // tagged fields
+        bos.write(new byte[] {0, 0, 0, 0}); // throttle time
+        
+      }
+     
+      int size = bos.size();
+      byte[] sizeBytes = ByteBuffer.allocate(4).putInt(size).array();
+      var response = bos.toByteArray();
+      System.out.println(Arrays.toString(sizeBytes));
+      System.out.println(Arrays.toString(response));
+      out.write(sizeBytes);
+      out.write(response);
+      out.flush();
 
   }
 
