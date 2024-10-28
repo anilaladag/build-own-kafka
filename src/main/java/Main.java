@@ -51,7 +51,7 @@ public class Main {
         bos.write(new byte[] {0, 0});       // error code
         bos.write(2);                       // array size + 1
         bos.write(new byte[] {0, 18});      // api_key
-        bos.write(new byte[] {0, 0});       // min version
+        bos.write(new byte[] {0, 3});       // min version
         bos.write(new byte[] {0, 4});       // max version
         bos.write(0);                       // tagged fields
         bos.write(new byte[] {0, 0, 0, 0}); // throttle time
