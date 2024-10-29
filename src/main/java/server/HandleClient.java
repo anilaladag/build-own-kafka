@@ -1,13 +1,17 @@
 package server;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.util.Collections;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import message.ConvertionOperations;
-import message.requests.kafkaV4.Request;
-import message.responses.kafkav4.Response;
+
+
 
 public class HandleClient extends Thread {
     private Socket clientSocket;
@@ -28,47 +32,48 @@ public class HandleClient extends Thread {
     }
 
     private void handleClientConnection(Socket client) throws IOException {
-        InputStream inputStream = client.getInputStream();
-        OutputStream outputStream = client.getOutputStream();
+        try (InputStream in = client.getInputStream(); OutputStream out = client.getOutputStream()) {
+      while (true) {
+        int requestLength = ConvertionOperations.byteArrayToInt(in.readNBytes(4));
+        short apiKey = ConvertionOperations.byteArrayToShort(in.readNBytes(2));
+        short apiVersion = ConvertionOperations.byteArrayToShort(in.readNBytes(2));
+        byte[] correlationId = in.readNBytes(4);
+        in.skipNBytes(requestLength - 8);
 
-        System.out.println("SERVER, message: New connection established.");
+        System.err.println("Request received - length: " + requestLength);
+        System.err.println("apiKey: " + apiKey);
+        System.err.println("apiVersion: " + apiVersion);
+        System.err.println("correlation id: " + ConvertionOperations.byteArrayToInt(correlationId));
 
-        while (true) {
-            try {
-                // Read request from client
-                Request request = new Request();
-                request.readRequestFromStream(inputStream);
+        ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
+        responseBody.write(correlationId);
 
-                // Log correlation ID
-                int correlationId = request.getHeader().getCorrelationId();
-                System.out.println("SERVER, new request: request's correlation Id is: " + correlationId);
-
-                // Create and populate response based on request
-                Response response = new Response();
-                response.fromRequest(request); // Populate the response here
-
-                // Ensure response is valid after population
-                if (response.getBody().getError_code() != (short) 0) {
-                    System.err.println("Error Code in response is not zero for correlation ID: " + correlationId);
-                }
-                if (response.getBody().getApiKey() != (short) 18 || response.getBody().getMaxVersion() < (short) 4) {
-                    System.err.println("Response for API key 18 is invalid for correlation ID: " + correlationId);
-                }
-
-                // Encode and send the response
-                byte[] encodedResponse = response.encodeResponse();
-                int responseLength = encodedResponse.length;
-
-                // Send length and response to the client
-                outputStream.write(ConvertionOperations.intToByteArray(responseLength));
-                outputStream.write(encodedResponse);
-                outputStream.flush();
-            } catch (IOException e) {
-                System.err.println("Error reading/writing to client: " + e.getMessage());
-                break; // Exit the loop on error
-            }
+        if (apiKey == ApiKeys.API_VERSION) {
+          if (SUPPORTED_API_VERSIONS.contains(apiVersion)) {
+            responseBody.write(ConvertionOperations.shortToByteArray(ErrorCodes.NONE));
+            responseBody.write(2); // Number of API keys + 1
+            responseBody.write(ConvertionOperations.shortToByteArray(apiKey));
+            responseBody.write(ConvertionOperations.shortToByteArray(Collections.min(SUPPORTED_API_VERSIONS)));
+            responseBody.write(ConvertionOperations.shortToByteArray(Collections.max(SUPPORTED_API_VERSIONS)));
+            responseBody.write(0); // tag buffer
+            responseBody.write(ConvertionOperations.intToByteArray(0)); // throttle_time
+            responseBody.write(0); // tag buffer
+          } else {
+            responseBody.write(ConvertionOperations.shortToByteArray(ErrorCodes.UNSUPPORTED_VERSION));
+            responseBody.write(ConvertionOperations.intToByteArray(0)); // throttle_time
+            responseBody.write(0); // tag buffer
+          }
         }
+
+        out.write(ConvertionOperations.intToByteArray(responseBody.size()));
+        out.write(responseBody.toByteArray());
+        out.flush();
+      }
+    } finally {
+        client.close();
     }
+    }
+
 
     private void closeClientSocket() {
         try {
@@ -79,5 +84,19 @@ public class HandleClient extends Thread {
         } catch (IOException e) {
             System.err.println("Error closing client socket: " + e.getMessage());
         }
+    }
+
+    public static final Set<Short> SUPPORTED_API_VERSIONS = Set.of(0, 1, 2, 3, 4)
+            .stream()
+            .map(Integer::shortValue)
+            .collect(Collectors.toUnmodifiableSet());
+
+    public static class ApiKeys {
+        public static final short API_VERSION = 18;
+    }
+
+    public static class ErrorCodes {
+        public static final short NONE = 0;
+        public static final short UNSUPPORTED_VERSION = 35;
     }
 }
